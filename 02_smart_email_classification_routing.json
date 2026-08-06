@@ -1,0 +1,318 @@
+{
+  "name": "2. Smart Email Classification & Routing with AI",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "New Email (Gmail Trigger)",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        340
+      ],
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CRED_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "ai_classify",
+      "name": "Classify Email (AI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        340
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"system\", \"content\": \"Classify the email into exactly one category: SALES, SUPPORT, BILLING, SPAM, OTHER. Reply with only the category word.\"}, {\"role\": \"user\", \"content\": \"={{ 'Subject: ' + $json.subject + '\\\\n\\\\nBody: ' + $json.text }}\"}], \"temperature\": 0.4}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "OPENAI_API_CREDENTIAL_ID",
+          "name": "OpenAI API Key (Bearer Header)"
+        }
+      }
+    },
+    {
+      "id": "extract",
+      "name": "Extract Category",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        800,
+        340
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "category",
+              "type": "string",
+              "value": "={{ $json.choices[0].message.content.trim() }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "switch",
+      "name": "Route by Category",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1080,
+        340
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "SALES",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "Sales"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "SUPPORT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "Support"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "BILLING",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "Billing"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "SPAM",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "Spam"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      }
+    },
+    {
+      "id": "slack_sales",
+      "name": "Notify Sales (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1380,
+        180
+      ],
+      "parameters": {
+        "select": "channel",
+        "channelId": "SALES_CHANNEL_ID",
+        "text": "=New sales email: {{ $('New Email (Gmail Trigger)').item.json.subject }}"
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CRED_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "id": "slack_support",
+      "name": "Notify Support (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1380,
+        300
+      ],
+      "parameters": {
+        "select": "channel",
+        "channelId": "SUPPORT_CHANNEL_ID",
+        "text": "=New support email: {{ $('New Email (Gmail Trigger)').item.json.subject }}"
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CRED_ID",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "id": "label_billing",
+      "name": "Label Billing (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1380,
+        420
+      ],
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('New Email (Gmail Trigger)').item.json.id }}",
+        "labelIds": [
+          "BILLING_LABEL_ID"
+        ]
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CRED_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "trash_spam",
+      "name": "Move to Trash (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1380,
+        540
+      ],
+      "parameters": {
+        "operation": "delete",
+        "messageId": "={{ $('New Email (Gmail Trigger)').item.json.id }}"
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_CRED_ID",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "New Email (Gmail Trigger)": {
+      "main": [
+        [
+          {
+            "node": "Classify Email (AI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Email (AI)": {
+      "main": [
+        [
+          {
+            "node": "Extract Category",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Category": {
+      "main": [
+        [
+          {
+            "node": "Route by Category",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Category": {
+      "main": [
+        [
+          {
+            "node": "Notify Sales (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Support (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label Billing (Gmail)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Move to Trash (Gmail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "instructions": "AI classifies each inbound email into SALES/SUPPORT/BILLING/SPAM/OTHER, then routes to the right Slack channel, Gmail label, or trash. Replace placeholder channel/label IDs."
+  },
+  "pinData": {}
+}
